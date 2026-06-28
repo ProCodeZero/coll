@@ -47,10 +47,12 @@ func main() {
 	outputFile := flag.String("output", "", "Name of the output file")
 	allFiles := flag.Bool("all", false, "Collect all files regardless of extension")
 
-	watch := flag.Bool("w", false, "Enable tree/watch mode")
-	flag.BoolVar(watch, "watch", false, "Enable tree/watch mode")
-	recursive := flag.Bool("r", false, "Recursive tree view")
-	flag.BoolVar(recursive, "recursive", false, "Recursive tree view")
+	// Changed from bool to int.
+	// -1 means disabled (default).
+	// 0 means unlimited depth (recursive).
+	// >0 limits the tree to that specific depth.
+	treeDepth := flag.Int("t", -1, "Recursive tree view with max depth (0 for unlimited)")
+	flag.IntVar(treeDepth, "tree", -1, "Recursive tree view with max depth (0 for unlimited)")
 
 	onlyExts := flag.String("o", "", "Only include files with these extensions (comma-separated, e.g., \"md,py,txt\")")
 	flag.StringVar(onlyExts, "only", "", "Only include files with these extensions (comma-separated)")
@@ -62,7 +64,7 @@ func main() {
 	flag.StringVar(unwrapFile, "unwrap", "", "Unwrap a collected .txt file back into a directory")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: coll [path] [--output output.txt] [--all] [-wr] [-o extensions] [-e extensions] [-u file.txt]\n")
+		fmt.Fprintf(os.Stderr, "Usage: coll [path] [--output output.txt] [--all] [-t depth] [-o extensions] [-e extensions] [-u file.txt]\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -93,8 +95,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *watch && *recursive {
-		tree := buildTree(rootAbs)
+	// If treeDepth is >= 0, tree mode is enabled
+	if *treeDepth >= 0 {
+		tree := buildTree(rootAbs, 0, *treeDepth)
 		printTree(tree)
 		return
 	}
@@ -309,9 +312,16 @@ func parseExtensions(extStr string) map[string]struct{} {
 	return result
 }
 
-func buildTree(dirPath string) *treeNode {
+// buildTree recursively builds the tree structure up to maxDepth
+func buildTree(dirPath string, currentDepth, maxDepth int) *treeNode {
 	name := filepath.Base(dirPath)
 	node := &treeNode{name: name, isDir: true}
+
+	// Stop traversing deeper if we've reached the specified max depth
+	// (maxDepth == 0 means unlimited depth)
+	if maxDepth > 0 && currentDepth >= maxDepth {
+		return node
+	}
 
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
@@ -337,7 +347,8 @@ func buildTree(dirPath string) *treeNode {
 				continue
 			}
 			childPath := filepath.Join(dirPath, entryName)
-			child := buildTree(childPath)
+			// Increment depth for children
+			child := buildTree(childPath, currentDepth+1, maxDepth)
 			node.children = append(node.children, child)
 		} else {
 			node.children = append(node.children, &treeNode{
